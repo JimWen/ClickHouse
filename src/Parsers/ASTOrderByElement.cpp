@@ -58,4 +58,9 @@ void ASTOrderByElement::formatImpl(const FormatSettings & settings, FormatState 
     }
 }
 
+void ASTOrderByElement::freeSchemaRewrite()
+{
+    children.front()->freeSchemaRewrite();
+}
+
 }
