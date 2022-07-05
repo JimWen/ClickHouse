@@ -99,7 +99,7 @@ const String & ASTIdentifier::name() const
 
 void ASTIdentifier::freeSchemaRewrite() {
     String old_name = this->name();
-    if (old_name.find_first_of(".")==std::string::npos) {
+    if (old_name.find_first_of(".")==std::string::npos && old_name.compare("_source")!=0) {
         this->setShortName("_o." + old_name);
     }
 }
