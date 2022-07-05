@@ -51,6 +51,8 @@ public:
 
     std::string getWindowDescription() const;
 
+    void freeSchemaRewrite() override;
+
 protected:
     void formatImplWithoutAlias(const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const override;
     void appendColumnNameImpl(WriteBuffer & ostr) const override;

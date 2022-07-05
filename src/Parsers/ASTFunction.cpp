@@ -621,6 +621,256 @@ void ASTFunction::formatImplWithoutAlias(const FormatSettings & settings, Format
     }
 }
 
+void ASTFunction::freeSchemaRewrite()
+{
+        /// Should this function to be written as operator?
+    bool written = false;
+
+    if (arguments && !parameters)
+    {
+        /// Unary prefix operators.
+        if (arguments->children.size() == 1)
+        {
+            const char * operators[] =
+            {
+                "negate",      "-",
+                "not",         "NOT ",
+                nullptr
+            };
+
+            for (const char ** func = operators; *func; func += 2)
+            {
+                if (strcasecmp(name.c_str(), func[0]) != 0)
+                {
+                    continue;
+                }
+
+                arguments->freeSchemaRewrite();
+                written = true;
+
+                break;
+            }
+        }
+    
+            /// Unary postfix operators.
+        if (!written && arguments->children.size() == 1)
+        {
+            const char * operators[] =
+            {
+                "isNull",          " IS NULL",
+                "isNotNull",       " IS NOT NULL",
+                nullptr
+            };
+
+            for (const char ** func = operators; *func; func += 2)
+            {
+                if (strcasecmp(name.c_str(), func[0]) != 0)
+                {
+                    continue;
+                }
+
+               
+                arguments->freeSchemaRewrite();
+                written = true;
+
+                break;
+            }
+        }
+
+        /** need_parens - do we need parentheses around the expression with the operator.
+          * They are needed only if this expression is included in another expression with the operator.
+          */
+
+        if (!written && arguments->children.size() == 2)
+        {
+            const char * operators[] =
+            {
+                "multiply",        " * ",
+                "divide",          " / ",
+                "modulo",          " % ",
+                "plus",            " + ",
+                "minus",           " - ",
+                "notEquals",       " != ",
+                "lessOrEquals",    " <= ",
+                "greaterOrEquals", " >= ",
+                "less",            " < ",
+                "greater",         " > ",
+                "equals",          " = ",
+                "like",            " LIKE ",
+                "ilike",           " ILIKE ",
+                "notLike",         " NOT LIKE ",
+                "notILike",        " NOT ILIKE ",
+                "in",              " IN ",
+                "notIn",           " NOT IN ",
+                "globalIn",        " GLOBAL IN ",
+                "globalNotIn",     " GLOBAL NOT IN ",
+                nullptr
+            };
+
+            for (const char ** func = operators; *func; func += 2)
+            {
+                if (name == std::string_view(func[0]))
+                {
+                    arguments->children[0]->freeSchemaRewrite();
+                    arguments->children[1]->freeSchemaRewrite();
+                    written = true;                             /// Format x IN 1 as x IN (1): put parens around rhs even if there is a single element in set
+                }
+            }
+
+            if (!written && name == "arrayElement"sv)
+            {
+                arguments->children[0]->freeSchemaRewrite();
+                arguments->children[1]->freeSchemaRewrite();
+                written = true;
+            }
+
+            if (!written && name == "tupleElement"sv)
+            {
+                // fuzzer sometimes may insert tupleElement() created from ASTLiteral:
+                //
+                //     Function_tupleElement, 0xx
+                //     -ExpressionList_, 0xx
+                //     --Literal_Int64_255, 0xx
+                //     --Literal_Int64_100, 0xx
+                //
+                // And in this case it will be printed as "255.100", which
+                // later will be parsed as float, and formatting will be
+                // inconsistent.
+                //
+                // So instead of printing it as regular tuple,
+                // let's print it as ExpressionList instead (i.e. with ", " delimiter).
+                bool tuple_arguments_valid = true;
+                const auto * lit_left = arguments->children[0]->as<ASTLiteral>();
+                const auto * lit_right = arguments->children[1]->as<ASTLiteral>();
+
+                if (lit_left)
+                {
+                    Field::Types::Which type = lit_left->value.getType();
+                    if (type != Field::Types::Tuple && type != Field::Types::Array)
+                    {
+                        tuple_arguments_valid = false;
+                    }
+                }
+
+                // It can be printed in a form of 'x.1' only if right hand side
+                // is an unsigned integer lineral. We also allow nonnegative
+                // signed integer literals, because the fuzzer sometimes inserts
+                // them, and we want to have consistent formatting.
+                if (tuple_arguments_valid && lit_right)
+                {
+                    if (isInt64OrUInt64FieldType(lit_right->value.getType())
+                        && lit_right->value.get<Int64>() >= 0)
+                    {
+                        arguments->children[0]->freeSchemaRewrite();
+                        arguments->children[1]->freeSchemaRewrite();
+                        written = true;
+                    }
+                }
+            }
+
+            if (!written && name == "lambda"sv)
+            {
+                /// Special case: zero elements tuple in lhs of lambda is printed as ().
+                /// Special case: one-element tuple in lhs of lambda is printed as its element.
+
+                const auto * first_arg_func = arguments->children[0]->as<ASTFunction>();
+                if (first_arg_func
+                    && first_arg_func->name == "tuple"
+                    && first_arg_func->arguments
+                    && (first_arg_func->arguments->children.size() == 1 || first_arg_func->arguments->children.empty()))
+                {
+                    if (first_arg_func->arguments->children.size() == 1)
+                        first_arg_func->arguments->children[0]->freeSchemaRewrite();
+                }
+                else
+                    arguments->children[0]->freeSchemaRewrite();
+
+                arguments->children[1]->freeSchemaRewrite();
+                written = true;
+            }
+        }
+
+        if (!written && arguments->children.size() >= 2)
+        {
+            const char * operators[] =
+            {
+                "and", " AND ",
+                "or", " OR ",
+                nullptr
+            };
+
+            for (const char ** func = operators; *func; func += 2)
+            {
+                if (name == std::string_view(func[0]))
+                {
+                    for (size_t i = 0; i < arguments->children.size(); ++i)
+                    {
+                        arguments->children[i]->freeSchemaRewrite();
+                    }
+                    written = true;
+                }
+            }
+        }
+
+        if (!written && name == "array"sv)
+        {
+            for (size_t i = 0; i < arguments->children.size(); ++i)
+            {
+                arguments->children[i]->freeSchemaRewrite();
+            }
+            written = true;
+        }
+
+        if (!written && arguments->children.size() >= 2 && name == "tuple"sv)
+        {
+            for (size_t i = 0; i < arguments->children.size(); ++i)
+            {
+                arguments->children[i]->freeSchemaRewrite();
+            }
+            written = true;
+        }
+
+        if (!written && name == "map"sv)
+        {
+            for (size_t i = 0; i < arguments->children.size(); ++i)
+            {
+                arguments->children[i]->freeSchemaRewrite();
+            }
+            written = true;
+        }
+    }
+
+    if (written)
+    {
+        return;
+    }
+
+    if (parameters)
+    {
+        parameters->freeSchemaRewrite();
+    }
+
+
+    if (arguments)
+    {
+
+        for (size_t i = 0, size = arguments->children.size(); i < size; ++i)
+        {
+            arguments->children[i]->freeSchemaRewrite();
+        }
+    }
+
+    if (!is_window_function)
+    {
+        return;
+    }
+
+    if (window_name.empty())
+    {
+        window_definition->freeSchemaRewrite();
+    }
+}
+
 String getFunctionName(const IAST * ast)
 {
     String res;
