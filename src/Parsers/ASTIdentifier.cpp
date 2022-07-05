@@ -97,6 +97,13 @@ const String & ASTIdentifier::name() const
     return full_name;
 }
 
+void ASTIdentifier::freeSchemaRewrite() {
+    String old_name = this->name();
+    if (old_name.find_first_of(".")==std::string::npos) {
+        this->setShortName("_o." + old_name);
+    }
+}
+
 void ASTIdentifier::formatImplWithoutAlias(const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const
 {
     auto format_element = [&](const String & elem_name)

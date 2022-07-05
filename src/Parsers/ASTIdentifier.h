@@ -49,6 +49,8 @@ public:
     void restoreTable();  // TODO(ilezhankin): get rid of this
     std::shared_ptr<ASTTableIdentifier> createTable() const;  // returns |nullptr| if identifier is not table.
 
+    void freeSchemaRewrite()  override;
+
 protected:
     String full_name;
     std::vector<String> name_parts;
