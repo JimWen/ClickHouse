@@ -15,6 +15,9 @@
 #include <Parsers/ASTInterpolateElement.h>
 #include <Parsers/ASTIdentifier.h>
 
+#include <Parsers/formatAST.h>
+#include <IO/WriteBufferFromOStream.h>
+
 
 namespace DB
 {
@@ -454,6 +457,48 @@ bool ParserSelectQuery::parseImpl(Pos & pos, ASTPtr & node, Expected & expected)
 
         if (!parser_settings.parse(pos, settings, expected))
             return false;
+    }
+
+    if (tables) {
+        auto fnReadTableName = [&]
+        {
+            String name;
+            std::stringstream io;
+            {
+                WriteBufferFromOStream out_buffer(io);
+                formatAST(*tables, out_buffer);
+            }
+            io >> name;
+            return name;
+        };
+
+        auto rawTableName = fnReadTableName();
+        if (!rawTableName.empty()) {
+            auto fnSplit = [](const std::string &text, std::vector<std::string> &tokens, const std::string &delimiter = " ") {
+                std::string::size_type lastPos = text.find_first_not_of(delimiter, 0);
+                std::string::size_type first_pos = text.find_first_of(delimiter, lastPos);
+                while (std::string::npos != first_pos || std::string::npos != lastPos) {
+                    tokens.emplace_back(text.substr(lastPos, first_pos - lastPos));
+                    lastPos = text.find_first_not_of(delimiter, first_pos);
+                    first_pos = text.find_first_of(delimiter, lastPos);
+                }
+            };
+
+            Strings result;
+            fnSplit(rawTableName, result, ".");
+            auto tableName = result.size()>=2 ? result[1] : result[0];
+
+            if (tableName.find("qtevent") < tableName.length()) {
+                if (with_expression_list) with_expression_list->freeSchemaRewrite();
+                if (select_expression_list) select_expression_list->freeSchemaRewrite();
+                if (order_expression_list) order_expression_list->freeSchemaRewrite();
+                if (prewhere_expression) prewhere_expression->freeSchemaRewrite();
+                if (where_expression) where_expression->freeSchemaRewrite();
+                if (group_expression_list) group_expression_list->freeSchemaRewrite();
+                if (having_expression) having_expression->freeSchemaRewrite();
+                if (window_list) window_list->freeSchemaRewrite();
+            }
+        }
     }
 
     select_query->setExpression(ASTSelectQuery::Expression::WITH, std::move(with_expression_list));
