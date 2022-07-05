@@ -239,6 +239,8 @@ public:
         throw Exception("Unknown element in AST: " + getID(), ErrorCodes::LOGICAL_ERROR);
     }
 
+    virtual void freeSchemaRewrite() {}
+
     // A simple way to add some user-readable context to an error message.
     std::string formatForErrorMessage() const;
     template <typename AstArray>
