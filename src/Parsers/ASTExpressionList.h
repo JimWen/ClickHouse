@@ -19,6 +19,8 @@ public:
     void formatImpl(const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const override;
     void formatImplMultiline(const FormatSettings & settings, FormatState & state, FormatStateStacked frame) const;
 
+    void freeSchemaRewrite() override;
+
     char separator;
 };
 

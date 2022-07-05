@@ -1,5 +1,6 @@
 #include <Parsers/ASTExpressionList.h>
 #include <IO/Operators.h>
+#include <Parsers/ASTIdentifier.h>
 
 
 namespace DB
@@ -72,6 +73,32 @@ void ASTExpressionList::formatImplMultiline(const FormatSettings & settings, For
 
         if (frame.surround_each_list_element_with_parens)
             settings.ostr << ")";
+    }
+}
+
+void ASTExpressionList::freeSchemaRewrite() 
+{
+    if (children.size()>=1) {
+        ASTs::const_iterator it = children.begin();
+        auto isDatatimeOrderBy = false;
+        if (((*it)->getID().compare("OrderByElement")==0) && ((*it)->children.front()->getColumnName().compare("datatime")==0)) {
+            auto new_time = (*it)->clone() ;
+            auto set_new_time = new_time->children.front()->as<ASTIdentifier>();
+            set_new_time->setShortName("_sort_time");
+
+            children.insert(children.begin(), new_time);
+            isDatatimeOrderBy = true;
+        }
+
+        auto i = 0;
+        for (ASTs::const_iterator it2 = children.begin(); it2 != children.end(); ++it2)
+        {
+            if (!isDatatimeOrderBy || (isDatatimeOrderBy && i>=2)) {
+                (*it2)->freeSchemaRewrite();
+            }
+
+            i++;
+        }
     }
 }
 
